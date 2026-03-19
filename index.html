@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>측정결과 정리 도구</title>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Malgun Gothic',Arial,sans-serif;background:linear-gradient(135deg,#1a237e 0%,#283593 40%,#1565c0 100%);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+.card{background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.25);padding:40px;width:100%;max-width:720px}
+h1{color:#1a237e;font-size:24px;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.subtitle{color:#666;font-size:13px;margin-bottom:28px;line-height:1.9;padding-left:2px}
+.drop-zone{border:2px dashed #90a4ae;border-radius:12px;padding:48px 20px;text-align:center;cursor:pointer;transition:all .2s;background:#fafafa;position:relative}
+.drop-zone:hover,.drop-zone.drag-over{border-color:#1a237e;background:#e8eaf6;transform:scale(1.01)}
+.drop-zone .icon{font-size:52px;margin-bottom:14px;display:block}
+.drop-zone p{color:#546e7a;font-size:14px;line-height:1.8}
+.drop-zone strong{color:#1a237e}
+#file-input{display:none}
+#file-list{margin-top:14px;max-height:220px;overflow-y:auto}
+.file-item{display:flex;align-items:center;gap:8px;padding:7px 12px;background:#f5f5f5;border-radius:7px;margin-bottom:4px;font-size:13px;color:#333;transition:background .15s}
+.file-item:hover{background:#ede7f6}
+.file-item .fi{color:#3949ab;font-size:15px}
+.file-item .remove{margin-left:auto;cursor:pointer;color:#e53935;font-size:17px;border:none;background:none;padding:0 4px;line-height:1;flex-shrink:0}
+.badge{display:inline-block;background:#1a237e;color:#fff;border-radius:20px;font-size:12px;padding:2px 10px;margin-left:8px;vertical-align:middle}
+.btn{display:block;width:100%;margin-top:22px;padding:15px;background:linear-gradient(90deg,#1a237e,#1565c0);color:#fff;border:none;border-radius:9px;font-size:16px;font-weight:bold;cursor:pointer;transition:all .2s;letter-spacing:.5px}
+.btn:hover:not(:disabled){background:linear-gradient(90deg,#283593,#1976d2);transform:translateY(-1px);box-shadow:0 4px 14px rgba(26,35,126,.4)}
+.btn:disabled{background:#b0bec5;cursor:not-allowed;transform:none;box-shadow:none}
+#status{margin-top:15px;padding:13px 16px;border-radius:9px;font-size:13px;display:none;line-height:1.6}
+#status.loading{background:#e3f2fd;color:#1565c0;border-left:4px solid #1565c0}
+#status.success{background:#e8f5e9;color:#2e7d32;border-left:4px solid #2e7d32}
+#status.error{background:#ffebee;color:#c62828;border-left:4px solid #c62828}
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid #90caf9;border-top-color:#1565c0;border-radius:50%;animation:spin .75s linear infinite;vertical-align:middle;margin-right:7px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.info-box{margin-top:18px;padding:14px 16px;background:#fff8e1;border-radius:9px;font-size:12px;color:#5d4037;border-left:4px solid #ffa000;line-height:1.8}
+.info-box strong{display:block;margin-bottom:4px;color:#e65100;font-size:13px}
+.legend{display:flex;gap:18px;margin-top:14px;font-size:12px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px}
+.dot{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.dot.red{background:#ff0000}
+.dot.orange{background:#ff6600}
+.dot.purple{background:#9c27b0}
+.dot.green{background:#c8e6c9;border:1px solid #aaa}
+footer{margin-top:22px;font-size:12px;color:rgba(255,255,255,.6);text-align:center}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>📊 측정결과 정리 도구</h1>
+  <p class="subtitle">
+    TXT 측정파일을 업로드하면 Excel 파일(.xlsx)로 자동 정리합니다<br>
+    서버 없이 브라우저에서 직접 처리 · 파일이 외부로 전송되지 않습니다
+  </p>
+
+  <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <span class="icon">📂</span>
+    <p><strong>여기를 클릭하거나 TXT / XLSX 파일을 끌어다 놓으세요</strong></p>
+    <p>TXT(Benchmark) · XLSX(天准) 파일을 함께 선택할 수 있습니다</p>
+    <input type="file" id="file-input" accept=".txt,.xlsx" multiple>
+  </div>
+
+  <div id="file-list"></div>
+
+  <button class="btn" id="submit-btn" disabled onclick="processFiles()">
+    ⚡ Excel 파일 생성하기 <span class="badge" id="cnt" style="display:none">0</span>
+  </button>
+
+  <div id="status"></div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="dot red"></div> FAIL (기준 초과)</div>
+    <div class="legend-item"><div class="dot orange"></div> Waive (초과 ≤ 0.04)</div>
+    <div class="legend-item"><div class="dot purple"></div> Need Repair (0.04 ~ 0.05)</div>
+    <div class="legend-item"><div class="dot green"></div> Pass</div>
+  </div>
+
+  <div class="info-box">
+    <strong>🟠 Waive / Need Repair 자동 판정</strong>
+    TXT(Benchmark): TPSX · TPSY · BTMPSX1 · BTMPSX2 · BTMPSY · BTMPSY1 · BTMPSY2 항목만 적용<br>
+    XLSX(天准): 모든 측정 항목 적용<br>
+    초과량 ≤ 0.04 → Waive(주황) &nbsp;|&nbsp; 0.04 &lt; 초과량 ≤ 0.05 → Need Repair(보라) &nbsp;|&nbsp; 초과량 &gt; 0.05 → FAIL
+  </div>
+</div>
+
+<footer>측정결과 정리 도구 · 모든 처리는 브라우저 내에서 수행됩니다</footer>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  설정
+// ══════════════════════════════════════════════════════════
+const WAIVE_MARGIN_1 = 0.04;   // 초과 ≤ 0.04 → Waive
+const WAIVE_MARGIN_2 = 0.05;   // 0.04 < 초과 ≤ 0.05 → Need Repair
+const WAIVE_KEYWORDS = ["TPSX","TPSY","BTMPSX1","BTMPSX2","BTMPSY","BTMPSY1","BTMPSY2"];
+
+// ARGB 색상 (ExcelJS 형식: AARRGGBB)
+const C = {
+  RED_BG:'FFFF0000',    RED_FG:'FFFFFFFF',
+  ORANGE_BG:'FFFF6600', ORANGE_FG:'FFFFFFFF',
+  REPAIR_BG:'FF9C27B0', REPAIR_FG:'FFFFFFFF',
+  HEADER_BG:'FF1F497D', HEADER_FG:'FFFFFFFF',
+  PASS_BG:'FFE8F5E9',   ALT_BG:'FFF5F5F5',
+  FAIL_DET:'FFFFEBEE',  WAIVE_DET:'FFFFF3E0', REPAIR_DET:'FFF3E5F5',
+  SECTION_BG:'FF37474F', SECTION_FG:'FFFFFFFF',
+  SFAIL_BG:'FFFFCDD2',  SOK_BG:'FFC8E6C9',
+  DARK_BG:'FF2E4057',   NAVY_BG:'FF1A237E', DARKRED_BG:'FFB71C1C',
+  BLACK:'FF000000',     GRAY:'FF555555',
+  DRED_FG:'FFC00000',   DORG_FG:'FFCC5500', DPUR_FG:'FF6A0080',
+  BORDER:'FFAAAAAA',
+};
+
+const THIN = s => ({ style:'thin', color:{ argb:C.BORDER } });
+const BORDER_ALL = { top:THIN(), left:THIN(), bottom:THIN(), right:THIN() };
+
+// ══════════════════════════════════════════════════════════
+//  파일 관리 UI
+// ══════════════════════════════════════════════════════════
+let selFiles = new DataTransfer();
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); addFiles([...e.dataTransfer.files]); });
+fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value=''; });
+
+function addFiles(newFiles) {
+  newFiles.filter(f=>{
+    const n=f.name.toLowerCase();
+    return n.endsWith('.txt') || n.endsWith('.xlsx');
+  }).forEach(f=>{
+    if(![...selFiles.files].some(x=>x.name===f.name)) selFiles.items.add(f);
+  });
+  render();
+}
+function removeFile(name) {
+  const dt=new DataTransfer();
+  [...selFiles.files].filter(f=>f.name!==name).forEach(f=>dt.items.add(f));
+  selFiles=dt; render();
+}
+function render() {
+  const files=[...selFiles.files];
+  const cnt=document.getElementById('cnt');
+  cnt.textContent=files.length; cnt.style.display=files.length?'inline-block':'none';
+  document.getElementById('submit-btn').disabled=!files.length;
+  document.getElementById('file-list').innerHTML=files.map(f=>
+    `<div class="file-item"><span class="fi">📄</span>${f.name}
+     <button class="remove" onclick="removeFile('${f.name.replace(/'/g,"\\'")}')">✕</button></div>`
+  ).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+//  TXT 파서
+// ══════════════════════════════════════════════════════════
+function parseTxt(text, filename) {
+  const lines = text.split(/\r?\n/);
+  const hdr = { program:'', date:'', company:'', machine:'', comment:'', filename };
+  const rows = []; let no=null, inData=false;
+  for (const line of lines) {
+    const s = line.trim(); let m;
+    if (s.startsWith('Program:')) {
+      m=s.match(/Program:\s*(.+?)\s{2,}(.+)/);
+      if(m){hdr.program=m[1].trim();hdr.date=m[2].trim();}
+    } else if (s.startsWith('Company:')) {
+      m=s.match(/Company:\s*(\S+)\s+.*Machine:\s*(\S+)/);
+      if(m){hdr.company=m[1].trim();hdr.machine=m[2].trim();}
+    } else if (s.startsWith('Comment:')) {
+      hdr.comment=s.slice(8).trim();
+    } else if (/^-{10,}/.test(s)) { inData=true; continue; }
+    if (!inData) continue;
+    if (/^\d+$/.test(s)) { no=parseInt(s); continue; }
+    m=s.match(/^(.+?)\s{2,}([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+(Pass|FAIL)/i);
+    if (m&&no!==null) rows.push({
+      no, measurement:m[1].trim(),
+      nominal:+m[2], actual:+m[3], deviation:+m[4], tolMinus:+m[5], tolPlus:+m[6],
+      pf:m[7].toUpperCase()
+    });
+  }
+  return { hdr, rows };
+}
+
+// ══════════════════════════════════════════════════════════
+//  XLSX 파서 (天准 측정기 형식)
+// ══════════════════════════════════════════════════════════
+async function parseXlsx(arrayBuffer, filename) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+  const ws = wb.worksheets[0];
+  const cv = (r,c) => { const v=ws.getCell(r,c).value; return v===null||v===undefined?'':String(v); };
+  const nv = (r,c) => { const v=ws.getCell(r,c).value; return typeof v==='number'?v:parseFloat(v)||0; };
+  const hdr = {
+    filename,
+    program:  cv(4,2),   // SampleNumber
+    date:     cv(4,6),   // Time
+    company:  cv(3,6),   // Operator
+    machine:  cv(3,2),   // Machine
+    comment:  '',
+  };
+  const rows = [];
+  let idx = 0;
+  const maxRow = ws.rowCount;
+  for (let ri=31; ri<=maxRow; ri++) {
+    const meas = ws.getCell(ri,1).value;
+    if (meas===null || meas===undefined) continue;
+    const actual=nv(ri,2), nominal=nv(ri,3), tolPlus=nv(ri,4), tolMinus=nv(ri,5);
+    const deviation=nv(ri,6), excess=nv(ri,7);
+    if (!meas) continue;
+    const pf = (excess!==0) ? 'FAIL' : 'PASS';
+    idx++;
+    rows.push({
+      no: idx,
+      measurement: String(meas),
+      nominal, actual, deviation,
+      tolMinus, tolPlus, pf,
+      waiveEligible: true,          // XLSX: 모든 항목 Waive 대상
+      _excess: Math.abs(excess),
+    });
+  }
+  return { hdr, rows };
+}
+
+// ══════════════════════════════════════════════════════════
+//  Waive 판정 (3단계)
+// ══════════════════════════════════════════════════════════
+function getWaiveStatus(r) {
+  // 반환: '' | 'Waive' | 'Need Repair'
+  if (r.pf!=='FAIL') return '';
+  let excess;
+  if (r.waiveEligible) {
+    // XLSX 행: 超差値(_excess)를 직접 사용
+    excess = r._excess || 0;
+  } else {
+    // TXT 행: WAIVE_KEYWORDS 필터 후 편차로 계산
+    const m=r.measurement.toUpperCase();
+    if (!WAIVE_KEYWORDS.some(k=>m.includes(k))) return '';
+    if      (r.deviation > r.tolPlus)  excess = r.deviation - r.tolPlus;
+    else if (r.deviation < r.tolMinus) excess = r.tolMinus  - r.deviation;
+    else return '';
+  }
+  if (excess <= WAIVE_MARGIN_1) return 'Waive';
+  if (excess <= WAIVE_MARGIN_2) return 'Need Repair';
+  return '';
+}
+
+// ══════════════════════════════════════════════════════════
+//  ExcelJS 헬퍼
+// ══════════════════════════════════════════════════════════
+function sc(cell, {val, bg, fg, bold=false, sz=9, ha='center', italic=false, fmt, border=true}={}) {
+  if (val!==undefined) cell.value=val;
+  cell.font={name:'Arial',bold,italic,size:sz,color:{argb:fg||C.BLACK}};
+  if (bg) cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:bg}};
+  cell.alignment={horizontal:ha,vertical:'middle',wrapText:false};
+  if (border) cell.border=BORDER_ALL;
+  if (fmt) cell.numFmt=fmt;
+}
+
+function safeSheet(name, used) {
+  name=name.replace(/[\\/*?:\[\]]/g,'_').slice(0,28);
+  let b=name,n=1; while(used.has(name)) name=`${b.slice(0,25)}_${n++}`;
+  used.add(name); return name;
+}
+
+// ══════════════════════════════════════════════════════════
+//  개별 제품 시트
+// ══════════════════════════════════════════════════════════
+const P_HDRS  = ["No.","측정항목","Nominal","Actual","Deviation","-Tol","+Tol","P/F","Waive"];
+const P_WITHS = [6,22,10,10,10,8,8,7,8];
+
+function buildSheet(ws, hdr, rows) {
+  P_WITHS.forEach((w,i)=>ws.getColumn(i+1).width=w);
+
+  ws.mergeCells(1,1,1,9);
+  sc(ws.getCell(1,1),{val:`${hdr.filename}  |  ${hdr.program}  |  ${hdr.date}`,bg:C.DARK_BG,fg:C.RED_FG,bold:true,sz:10,ha:'left',border:false});
+  ws.getRow(1).height=18;
+
+  ws.mergeCells(2,1,2,9);
+  sc(ws.getCell(2,1),{val:`Comment: ${hdr.comment}  |  Company: ${hdr.company}  |  Machine: ${hdr.machine}`,fg:C.GRAY,italic:true,sz:8,ha:'left',border:false});
+  ws.getRow(2).height=14;
+
+  P_HDRS.forEach((t,i)=>{ sc(ws.getCell(3,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}); });
+  ws.getRow(3).height=16;
+
+  let fails=0;
+  const NUMCOLS=[3,4,5,6,7];
+  rows.forEach((r,idx)=>{
+    const rn=idx+4, fail=r.pf==='FAIL', wCode=getWaiveStatus(r);
+    if(fail) fails++;
+    const bg=(rn%2===0)?C.PASS_BG:C.ALT_BG;
+    const vals=[r.no,r.measurement,r.nominal,r.actual,r.deviation,r.tolMinus,r.tolPlus,r.pf,wCode];
+    const HAS=['center','left','center','center','center','center','center','center','center'];
+    vals.forEach((v,ci)=>{
+      const col=ci+1, cell=ws.getCell(rn,col), fmt=NUMCOLS.includes(col)?'0.000':undefined;
+      if (col===8) {
+        sc(cell,{val:v, bg:fail?C.RED_BG:bg, fg:fail?C.RED_FG:C.BLACK, bold:fail, ha:'center',fmt});
+      } else if (col===9) {
+        const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG : bg;
+        const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG : C.BLACK;
+        sc(cell,{val:v, bg:wBg, fg:wFg, bold:!!wCode, ha:'center',fmt});
+      } else {
+        const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET : (fail?C.FAIL_DET:bg);
+        sc(cell,{val:v, bg:rowBg, ha:HAS[ci], fmt});
+      }
+    });
+    ws.getRow(rn).height=14;
+  });
+  return {fails, total:rows.length};
+}
+
+// ══════════════════════════════════════════════════════════
+//  요약 시트
+// ══════════════════════════════════════════════════════════
+const S_HDRS  = ["파일명","제품(Program)","날짜/시간","Comment","총 측정수","FAIL 수","Waive 수","Need Repair 수","PASS 수","합격률(%)"];
+const S_WITHS = [32,30,28,18,12,10,10,14,10,12];
+const D_HDRS  = ["파일명","제품(Program)","Comment","No.","측정항목","Nominal","Actual","Deviation","-Tol","+Tol","P/F","Waive"];
+const D_WITHS = [32,30,18,6,22,10,10,10,8,8,7,8];
+
+function buildSummary(ws, data) {
+  D_WITHS.forEach((w,i)=>ws.getColumn(i+1).width=w);
+
+  // ── 통계 섹션 ───────────────────────────────────────────
+  ws.mergeCells(1,1,1,S_HDRS.length);
+  sc(ws.getCell(1,1),{val:'■  제품별 측정 결과 통계 (Statistics)',bg:C.NAVY_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
+  ws.getRow(1).height=22;
+
+  S_HDRS.forEach((t,i)=>sc(ws.getCell(2,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
+  ws.getRow(2).height=16;
+
+  let sRow=2;
+  data.forEach(d=>{
+    sRow++;
+    const hasFail=d.fail>0, hasWaive=d.waive>0, hasRepair=d.repair>0;
+    const bg=hasFail?C.SFAIL_BG:C.SOK_BG;
+    const vals=[d.filename,d.program,d.date,d.comment,d.total,d.fail,d.waive,d.repair,d.pass,d.rate];
+    const HA=['left','left','left','left','center','center','center','center','center','center'];
+    vals.forEach((v,ci)=>{
+      const col=ci+1, cell=ws.getCell(sRow,col);
+      let fg=C.BLACK, bold=false;
+      if(hasFail   &&col===6){fg=C.DRED_FG; bold=true;}
+      if(hasWaive  &&col===7){fg=C.DORG_FG; bold=true;}
+      if(hasRepair &&col===8){fg=C.DPUR_FG; bold=true;}
+      sc(cell,{val:v,bg,fg,bold,ha:HA[ci],fmt:col===10?'0.0':undefined});
+    });
+    ws.getRow(sRow).height=14;
+  });
+
+  // ── FAIL 상세 섹션 ──────────────────────────────────────
+  const detStart=sRow+2, nd=D_HDRS.length;
+
+  ws.mergeCells(detStart,1,detStart,nd);
+  sc(ws.getCell(detStart,1),{val:'■  기준 초과(FAIL) 상세 목록',bg:C.DARKRED_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
+  ws.getRow(detStart).height=22;
+
+  D_HDRS.forEach((t,i)=>sc(ws.getCell(detStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
+  ws.getRow(detStart+1).height=16;
+
+  let cur=detStart+2, prevFile=null;
+  const NUMCOLS=[6,7,8,9,10];
+
+  data.forEach(d=>{
+    if (!d.failRows.length) return;
+    if (prevFile!==d.filename) {
+      ws.mergeCells(cur,1,cur,nd);
+      sc(ws.getCell(cur,1),{val:`  ${d.filename}   |   ${d.program}   |   ${d.comment}`,bg:C.SECTION_BG,fg:C.SECTION_FG,bold:true,sz:9,ha:'left',border:false});
+      ws.getRow(cur).height=15; cur++; prevFile=d.filename;
+    }
+    d.failRows.forEach(r=>{
+      const wCode=getWaiveStatus(r);
+      const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET : C.FAIL_DET;
+      const vals=[d.filename,d.program,d.comment,r.no,r.measurement,r.nominal,r.actual,r.deviation,r.tolMinus,r.tolPlus,r.pf,wCode];
+      const HA=['left','left','left','center','left','center','center','center','center','center','center','center'];
+      vals.forEach((v,ci)=>{
+        const col=ci+1, cell=ws.getCell(cur,col), fmt=NUMCOLS.includes(col)?'0.000':undefined;
+        if (col===11) {
+          sc(cell,{val:v,bg:C.RED_BG,fg:C.RED_FG,bold:true,ha:'center',fmt});
+        } else if (col===12) {
+          const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG : rowBg;
+          const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG : C.BLACK;
+          sc(cell,{val:v,bg:wBg,fg:wFg,bold:!!wCode,ha:'center',fmt});
+        } else {
+          sc(cell,{val:v,bg:rowBg,ha:HA[ci],fmt});
+        }
+      });
+      ws.getRow(cur).height=14; cur++;
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+//  메인 처리
+// ══════════════════════════════════════════════════════════
+async function processFiles() {
+  const files=[...selFiles.files];
+  if (!files.length) return;
+  const btn=document.getElementById('submit-btn');
+  const status=document.getElementById('status');
+  btn.disabled=true;
+  status.style.display='block'; status.className='loading';
+  status.innerHTML='<span class="spinner"></span>처리 중입니다... 잠시 기다려 주세요';
+
+  try {
+    // 파일을 이름순 정렬 후 각각 파싱
+    const sortedFiles = [...files].sort((a,b)=>a.name.localeCompare(b.name));
+    const parsed = await Promise.all(sortedFiles.map(async f => {
+      const n = f.name.toLowerCase();
+      if (n.endsWith('.xlsx')) {
+        const buf = await f.arrayBuffer();
+        return parseXlsx(buf, f.name);
+      } else {
+        const text = await f.text();
+        return parseTxt(text, f.name);
+      }
+    }));
+    const fileList = sortedFiles.map((f,i)=>({name:f.name, ...parsed[i]}));
+
+    const wb = new ExcelJS.Workbook();
+    const summaryWs = wb.addWorksheet('📋 요약');   // 첫 번째 탭
+    const used = new Set(['📋 요약']);
+    const summaryData = [];
+
+    for (const {name, hdr, rows} of fileList) {
+      if (!rows.length) continue;
+
+      const sname = safeSheet(name.replace(/\.(txt|xlsx)$/i,''), used);
+      const ws = wb.addWorksheet(sname);
+      const {fails, total} = buildSheet(ws, hdr, rows);
+
+      const failRows  = rows.filter(r=>r.pf==='FAIL');
+      const waiveCnt  = failRows.filter(r=>getWaiveStatus(r)==='Waive').length;
+      const repairCnt = failRows.filter(r=>getWaiveStatus(r)==='Need Repair').length;
+
+      summaryData.push({
+        filename:name, program:hdr.program, date:hdr.date, comment:hdr.comment,
+        total, fail:fails, waive:waiveCnt, repair:repairCnt, pass:total-fails,
+        rate: total>0 ? (total-fails)/total*100 : 0,
+        failRows
+      });
+    }
+
+    buildSummary(summaryWs, summaryData);
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download='측정결과_정리.xlsx'; a.click();
+    URL.revokeObjectURL(url);
+
+    const tFail   = summaryData.reduce((s,d)=>s+d.fail,0);
+    const tWaive  = summaryData.reduce((s,d)=>s+d.waive,0);
+    const tRepair = summaryData.reduce((s,d)=>s+d.repair,0);
+    status.className='success';
+    status.innerHTML=`✅ 완료!&nbsp; ${summaryData.length}개 제품 &nbsp;·&nbsp; FAIL <strong>${tFail}건</strong> &nbsp;·&nbsp; Waive <strong>${tWaive}건</strong> &nbsp;·&nbsp; Need Repair <strong>${tRepair}건</strong> &nbsp;·&nbsp; Excel 다운로드 시작`;
+  } catch(e) {
+    status.className='error';
+    status.innerHTML=`❌ 오류: ${e.message}`;
+    console.error(e);
+  } finally {
+    btn.disabled=false;
+  }
+}
+</script>
+</body>
+</html>
