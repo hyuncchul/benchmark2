@@ -335,9 +335,47 @@ const D_HDRS  = ["파일명","제품(Program)","Comment","No.","측정항목","N
 const D_WITHS = [32,30,18,6,22,10,10,10,8,8,7,12];
 
 function buildSummary(ws, data) {
+  const nd = D_HDRS.length;
+  const NUMCOLS = [6,7,8,9,10];
+  const REPAIR_CODES = new Set(['Need Repair','NG+Repair','Need Check']);
+
+  // ── 공통: 컬럼 너비 (D_WITHS 기준, S_HDRS가 더 넓으므로 max 적용) ──
   D_WITHS.forEach((w,i)=>ws.getColumn(i+1).width=w);
 
-  // ── 통계 섹션 ───────────────────────────────────────────
+  // ── 헬퍼: 파일 구분 헤더 ───────────────────────────────
+  function writeFileHdr(row, d) {
+    ws.mergeCells(row,1,row,nd);
+    sc(ws.getCell(row,1),{val:`  ${d.filename}   |   ${d.program}   |   ${d.comment}`,
+      bg:C.SECTION_BG,fg:C.SECTION_FG,bold:true,sz:9,ha:'left',border:false});
+    ws.getRow(row).height=15;
+  }
+
+  // ── 헬퍼: 상세 데이터 행 ─────────────────────────────
+  function writeDetailRow(row, d, r) {
+    const wCode = getWaiveStatus(r);
+    const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET
+                : wCode==='NG+Repair'?C.NGREPAIR_DET : wCode==='Need Check'?C.CHECK_DET : C.FAIL_DET;
+    const vals = [d.filename,d.program,d.comment,r.no,r.measurement,
+                  r.nominal,r.actual,r.deviation,r.tolMinus,r.tolPlus,r.pf,wCode];
+    const HA = ['left','left','left','center','left','center','center','center','center','center','center','center'];
+    vals.forEach((v,ci)=>{
+      const col=ci+1, cell=ws.getCell(row,col), fmt=NUMCOLS.includes(col)?'0.000':undefined;
+      if (col===11) {
+        sc(cell,{val:v,bg:C.RED_BG,fg:C.RED_FG,bold:true,ha:'center',fmt});
+      } else if (col===12) {
+        const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG
+                  : wCode==='NG+Repair'?C.NGREPAIR_BG : wCode==='Need Check'?C.CHECK_BG : rowBg;
+        const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG
+                  : wCode==='NG+Repair'?C.NGREPAIR_FG : wCode==='Need Check'?C.CHECK_FG : C.BLACK;
+        sc(cell,{val:v,bg:wBg,fg:wFg,bold:!!wCode,ha:'center',fmt});
+      } else {
+        sc(cell,{val:v,bg:rowBg,ha:HA[ci],fmt});
+      }
+    });
+    ws.getRow(row).height=14;
+  }
+
+  // ══ ① 통계 섹션 ════════════════════════════════════════
   ws.mergeCells(1,1,1,S_HDRS.length);
   sc(ws.getCell(1,1),{val:'■  제품별 측정 결과 통계 (Statistics)',bg:C.NAVY_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
   ws.getRow(1).height=22;
@@ -366,48 +404,44 @@ function buildSummary(ws, data) {
     ws.getRow(sRow).height=14;
   });
 
-  // ── FAIL 상세 섹션 ──────────────────────────────────────
-  const detStart=sRow+2, nd=D_HDRS.length;
+  // ══ ② 조치 필요 항목 섹션 (통계 바로 아래) ═══════════
+  const repStart = sRow+2;
+  ws.mergeCells(repStart,1,repStart,nd);
+  sc(ws.getCell(repStart,1),{val:'■  조치 필요 항목 (Need Repair / NG+Repair / Need Check)',
+    bg:'FF4A148C',fg:C.REPAIR_FG,bold:true,sz:12,ha:'left',border:false});
+  ws.getRow(repStart).height=22;
 
+  D_HDRS.forEach((t,i)=>sc(ws.getCell(repStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
+  ws.getRow(repStart+1).height=16;
+
+  let rCur=repStart+2, rPrevFile=null, hasRepairRows=false;
+  data.forEach(d=>{
+    const repRows = d.failRows.filter(r=>REPAIR_CODES.has(getWaiveStatus(r)));
+    if (!repRows.length) return;
+    hasRepairRows=true;
+    if (rPrevFile!==d.filename) { writeFileHdr(rCur,d); rCur++; rPrevFile=d.filename; }
+    repRows.forEach(r=>{ writeDetailRow(rCur,d,r); rCur++; });
+  });
+  if (!hasRepairRows) {
+    ws.mergeCells(rCur,1,rCur,nd);
+    sc(ws.getCell(rCur,1),{val:'  조치 필요 항목 없음',fg:C.GRAY,sz:9,ha:'left',border:false});
+    ws.getRow(rCur).height=14; rCur++;
+  }
+
+  // ══ ③ FAIL 전체 상세 섹션 ══════════════════════════════
+  const detStart = rCur+2;
   ws.mergeCells(detStart,1,detStart,nd);
-  sc(ws.getCell(detStart,1),{val:'■  기준 초과(FAIL) 상세 목록',bg:C.DARKRED_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
+  sc(ws.getCell(detStart,1),{val:'■  기준 초과(FAIL) 전체 상세 목록',bg:C.DARKRED_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
   ws.getRow(detStart).height=22;
 
   D_HDRS.forEach((t,i)=>sc(ws.getCell(detStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
   ws.getRow(detStart+1).height=16;
 
   let cur=detStart+2, prevFile=null;
-  const NUMCOLS=[6,7,8,9,10];
-
   data.forEach(d=>{
     if (!d.failRows.length) return;
-    if (prevFile!==d.filename) {
-      ws.mergeCells(cur,1,cur,nd);
-      sc(ws.getCell(cur,1),{val:`  ${d.filename}   |   ${d.program}   |   ${d.comment}`,bg:C.SECTION_BG,fg:C.SECTION_FG,bold:true,sz:9,ha:'left',border:false});
-      ws.getRow(cur).height=15; cur++; prevFile=d.filename;
-    }
-    d.failRows.forEach(r=>{
-      const wCode=getWaiveStatus(r);
-      const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET
-                  : wCode==='NG+Repair'?C.NGREPAIR_DET : wCode==='Need Check'?C.CHECK_DET : C.FAIL_DET;
-      const vals=[d.filename,d.program,d.comment,r.no,r.measurement,r.nominal,r.actual,r.deviation,r.tolMinus,r.tolPlus,r.pf,wCode];
-      const HA=['left','left','left','center','left','center','center','center','center','center','center','center'];
-      vals.forEach((v,ci)=>{
-        const col=ci+1, cell=ws.getCell(cur,col), fmt=NUMCOLS.includes(col)?'0.000':undefined;
-        if (col===11) {
-          sc(cell,{val:v,bg:C.RED_BG,fg:C.RED_FG,bold:true,ha:'center',fmt});
-        } else if (col===12) {
-          const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG
-                    : wCode==='NG+Repair'?C.NGREPAIR_BG : wCode==='Need Check'?C.CHECK_BG : rowBg;
-          const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG
-                    : wCode==='NG+Repair'?C.NGREPAIR_FG : wCode==='Need Check'?C.CHECK_FG : C.BLACK;
-          sc(cell,{val:v,bg:wBg,fg:wFg,bold:!!wCode,ha:'center',fmt});
-        } else {
-          sc(cell,{val:v,bg:rowBg,ha:HA[ci],fmt});
-        }
-      });
-      ws.getRow(cur).height=14; cur++;
-    });
+    if (prevFile!==d.filename) { writeFileHdr(cur,d); cur++; prevFile=d.filename; }
+    d.failRows.forEach(r=>{ writeDetailRow(cur,d,r); cur++; });
   });
 }
 
