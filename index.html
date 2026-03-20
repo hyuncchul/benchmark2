@@ -70,16 +70,17 @@ footer{margin-top:22px;font-size:12px;color:rgba(255,255,255,.6);text-align:cent
 
   <div class="legend">
     <div class="legend-item"><div class="dot red"></div> FAIL (기준 초과)</div>
-    <div class="legend-item"><div class="dot orange"></div> Waive (초과 ≤ 0.04)</div>
-    <div class="legend-item"><div class="dot purple"></div> Need Repair (0.04 ~ 0.05)</div>
+    <div class="legend-item"><div class="dot orange"></div> Waive (+초과 ≤ 0.04)</div>
+    <div class="legend-item"><div class="dot purple"></div> Need Repair (+초과 0.04~0.05)</div>
+    <div class="legend-item"><div class="dot" style="background:#c62828"></div> NG+Repair (+초과 &gt; 0.05)</div>
+    <div class="legend-item"><div class="dot" style="background:#1565c0"></div> Need Check (−방향 초과)</div>
     <div class="legend-item"><div class="dot green"></div> Pass</div>
   </div>
 
   <div class="info-box">
-    <strong>🟠 Waive / Need Repair 자동 판정</strong>
-    TXT(Benchmark): TPSX · TPSY · BTMPSX1 · BTMPSX2 · BTMPSY · BTMPSY1 · BTMPSY2 항목만 적용<br>
-    XLSX(天准): 모든 측정 항목 적용<br>
-    초과량 ≤ 0.04 → Waive(주황) &nbsp;|&nbsp; 0.04 &lt; 초과량 ≤ 0.05 → Need Repair(보라) &nbsp;|&nbsp; 초과량 &gt; 0.05 → FAIL
+    <strong>📋 판정 기준 (TXT · XLSX 모든 항목 적용)</strong>
+    +방향 초과(Nominal+Tol+ 초과): 초과 ≤ 0.04 → <b>Waive</b>(주황) &nbsp;|&nbsp; 0.04 &lt; 초과 ≤ 0.05 → <b>Need Repair</b>(보라) &nbsp;|&nbsp; 초과 &gt; 0.05 → <b>NG+Repair</b>(진빨강)<br>
+    −방향 초과(Nominal−Tol− 미만): → <b>Need Check</b>(파랑)
   </div>
 </div>
 
@@ -89,23 +90,28 @@ footer{margin-top:22px;font-size:12px;color:rgba(255,255,255,.6);text-align:cent
 // ══════════════════════════════════════════════════════════
 //  설정
 // ══════════════════════════════════════════════════════════
-const WAIVE_MARGIN_1 = 0.04;   // 초과 ≤ 0.04 → Waive
-const WAIVE_MARGIN_2 = 0.05;   // 0.04 < 초과 ≤ 0.05 → Need Repair
-const WAIVE_KEYWORDS = ["TPSX","TPSY","BTMPSX1","BTMPSX2","BTMPSY","BTMPSY1","BTMPSY2"];
+const WAIVE_MARGIN_1 = 0.04;   // +초과 ≤ 0.04      → Waive
+const WAIVE_MARGIN_2 = 0.05;   // 0.04 < +초과 ≤ 0.05 → Need Repair
+                                // +초과 > 0.05      → NG+Repair
+                                // -방향 초과         → Need Check
 
 // ARGB 색상 (ExcelJS 형식: AARRGGBB)
 const C = {
   RED_BG:'FFFF0000',    RED_FG:'FFFFFFFF',
   ORANGE_BG:'FFFF6600', ORANGE_FG:'FFFFFFFF',
   REPAIR_BG:'FF9C27B0', REPAIR_FG:'FFFFFFFF',
+  NGREPAIR_BG:'FFC62828', NGREPAIR_FG:'FFFFFFFF',   // NG+Repair (진한 빨강)
+  CHECK_BG:'FF1565C0',  CHECK_FG:'FFFFFFFF',          // Need Check (파랑)
   HEADER_BG:'FF1F497D', HEADER_FG:'FFFFFFFF',
   PASS_BG:'FFE8F5E9',   ALT_BG:'FFF5F5F5',
   FAIL_DET:'FFFFEBEE',  WAIVE_DET:'FFFFF3E0', REPAIR_DET:'FFF3E5F5',
+  NGREPAIR_DET:'FFFBE9E7', CHECK_DET:'FFE3F2FD',     // 행 배경색
   SECTION_BG:'FF37474F', SECTION_FG:'FFFFFFFF',
   SFAIL_BG:'FFFFCDD2',  SOK_BG:'FFC8E6C9',
   DARK_BG:'FF2E4057',   NAVY_BG:'FF1A237E', DARKRED_BG:'FFB71C1C',
   BLACK:'FF000000',     GRAY:'FF555555',
   DRED_FG:'FFC00000',   DORG_FG:'FFCC5500', DPUR_FG:'FF6A0080',
+  DNGR_FG:'FF8B0000',   DCHK_FG:'FF0D47A1',           // 요약 글자색
   BORDER:'FFAAAAAA',
 };
 
@@ -213,33 +219,43 @@ async function parseXlsx(arrayBuffer, filename) {
       nominal, actual, deviation,
       tolMinus, tolPlus, pf,
       waiveEligible: true,          // XLSX: 모든 항목 Waive 대상
-      _excess: Math.abs(excess),
+      _excess: Math.round(excess * 10000) / 10000,  // 소수점 4자리, 부호 유지: 양수=상한 초과, 음수=하한 미만
     });
   }
   return { hdr, rows };
 }
 
 // ══════════════════════════════════════════════════════════
-//  Waive 판정 (3단계)
+//  Waive 판정 (4단계)
 // ══════════════════════════════════════════════════════════
 function getWaiveStatus(r) {
-  // 반환: '' | 'Waive' | 'Need Repair'
+  // 반환: '' | 'Waive' | 'Need Repair' | 'NG+Repair' | 'Need Check'
+  // TXT / XLSX 모든 항목 적용 (키워드 필터 제거)
+  // +방향 초과: ≤0.04 Waive / ≤0.05 Need Repair / >0.05 NG+Repair
+  // -방향 초과: Need Check
   if (r.pf!=='FAIL') return '';
-  let excess;
+
   if (r.waiveEligible) {
-    // XLSX 행: 超差値(_excess)를 직접 사용
-    excess = r._excess || 0;
+    // XLSX: _excess 부호로 방향 판단
+    const raw = r._excess || 0;
+    if (raw < 0) return 'Need Check';        // 하한 미만
+    if (raw === 0) return '';
+    const excess = Math.round(raw * 10000) / 10000;
+    if (excess <= WAIVE_MARGIN_1) return 'Waive';
+    if (excess <= WAIVE_MARGIN_2) return 'Need Repair';
+    return 'NG+Repair';
   } else {
-    // TXT 행: WAIVE_KEYWORDS 필터 후 편차로 계산
-    const m=r.measurement.toUpperCase();
-    if (!WAIVE_KEYWORDS.some(k=>m.includes(k))) return '';
-    if      (r.deviation > r.tolPlus)  excess = r.deviation - r.tolPlus;
-    else if (r.deviation < r.tolMinus) excess = r.tolMinus  - r.deviation;
-    else return '';
+    // TXT: deviation 방향으로 판단 (모든 항목 적용)
+    if (r.deviation > r.tolPlus) {
+      const excess = Math.round((r.deviation - r.tolPlus) * 10000) / 10000;
+      if (excess <= WAIVE_MARGIN_1) return 'Waive';
+      if (excess <= WAIVE_MARGIN_2) return 'Need Repair';
+      return 'NG+Repair';
+    } else if (r.deviation < r.tolMinus) {
+      return 'Need Check';
+    }
+    return '';
   }
-  if (excess <= WAIVE_MARGIN_1) return 'Waive';
-  if (excess <= WAIVE_MARGIN_2) return 'Need Repair';
-  return '';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -293,11 +309,15 @@ function buildSheet(ws, hdr, rows) {
       if (col===8) {
         sc(cell,{val:v, bg:fail?C.RED_BG:bg, fg:fail?C.RED_FG:C.BLACK, bold:fail, ha:'center',fmt});
       } else if (col===9) {
-        const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG : bg;
-        const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG : C.BLACK;
+        const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG
+                  : wCode==='NG+Repair'?C.NGREPAIR_BG : wCode==='Need Check'?C.CHECK_BG : bg;
+        const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG
+                  : wCode==='NG+Repair'?C.NGREPAIR_FG : wCode==='Need Check'?C.CHECK_FG : C.BLACK;
         sc(cell,{val:v, bg:wBg, fg:wFg, bold:!!wCode, ha:'center',fmt});
       } else {
-        const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET : (fail?C.FAIL_DET:bg);
+        const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET
+                    : wCode==='NG+Repair'?C.NGREPAIR_DET : wCode==='Need Check'?C.CHECK_DET
+                    : (fail?C.FAIL_DET:bg);
         sc(cell,{val:v, bg:rowBg, ha:HAS[ci], fmt});
       }
     });
@@ -309,10 +329,10 @@ function buildSheet(ws, hdr, rows) {
 // ══════════════════════════════════════════════════════════
 //  요약 시트
 // ══════════════════════════════════════════════════════════
-const S_HDRS  = ["파일명","제품(Program)","날짜/시간","Comment","총 측정수","FAIL 수","Waive 수","Need Repair 수","PASS 수","합격률(%)"];
-const S_WITHS = [32,30,28,18,12,10,10,14,10,12];
-const D_HDRS  = ["파일명","제품(Program)","Comment","No.","측정항목","Nominal","Actual","Deviation","-Tol","+Tol","P/F","Waive"];
-const D_WITHS = [32,30,18,6,22,10,10,10,8,8,7,8];
+const S_HDRS  = ["파일명","제품(Program)","날짜/시간","Comment","총 측정수","FAIL 수","Waive 수","Need Repair 수","NG+Repair 수","Need Check 수","PASS 수","합격률(%)"];
+const S_WITHS = [32,30,28,18,12,10,10,14,12,13,10,12];
+const D_HDRS  = ["파일명","제품(Program)","Comment","No.","측정항목","Nominal","Actual","Deviation","-Tol","+Tol","P/F","판정"];
+const D_WITHS = [32,30,18,6,22,10,10,10,8,8,7,12];
 
 function buildSummary(ws, data) {
   D_WITHS.forEach((w,i)=>ws.getColumn(i+1).width=w);
@@ -328,17 +348,20 @@ function buildSummary(ws, data) {
   let sRow=2;
   data.forEach(d=>{
     sRow++;
-    const hasFail=d.fail>0, hasWaive=d.waive>0, hasRepair=d.repair>0;
+    const hasFail=d.fail>0, hasWaive=d.waive>0, hasRepair=d.repair>0,
+          hasNgr=d.ngrepair>0, hasChk=d.check>0;
     const bg=hasFail?C.SFAIL_BG:C.SOK_BG;
-    const vals=[d.filename,d.program,d.date,d.comment,d.total,d.fail,d.waive,d.repair,d.pass,d.rate];
-    const HA=['left','left','left','left','center','center','center','center','center','center'];
+    const vals=[d.filename,d.program,d.date,d.comment,d.total,d.fail,d.waive,d.repair,d.ngrepair,d.check,d.pass,d.rate];
+    const HA=['left','left','left','left','center','center','center','center','center','center','center','center'];
     vals.forEach((v,ci)=>{
       const col=ci+1, cell=ws.getCell(sRow,col);
       let fg=C.BLACK, bold=false;
-      if(hasFail   &&col===6){fg=C.DRED_FG; bold=true;}
-      if(hasWaive  &&col===7){fg=C.DORG_FG; bold=true;}
-      if(hasRepair &&col===8){fg=C.DPUR_FG; bold=true;}
-      sc(cell,{val:v,bg,fg,bold,ha:HA[ci],fmt:col===10?'0.0':undefined});
+      if(hasFail  &&col===6 ){fg=C.DRED_FG; bold=true;}
+      if(hasWaive &&col===7 ){fg=C.DORG_FG; bold=true;}
+      if(hasRepair&&col===8 ){fg=C.DPUR_FG; bold=true;}
+      if(hasNgr   &&col===9 ){fg=C.DNGR_FG; bold=true;}
+      if(hasChk   &&col===10){fg=C.DCHK_FG; bold=true;}
+      sc(cell,{val:v,bg,fg,bold,ha:HA[ci],fmt:col===12?'0.0':undefined});
     });
     ws.getRow(sRow).height=14;
   });
@@ -365,7 +388,8 @@ function buildSummary(ws, data) {
     }
     d.failRows.forEach(r=>{
       const wCode=getWaiveStatus(r);
-      const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET : C.FAIL_DET;
+      const rowBg = wCode==='Waive'?C.WAIVE_DET : wCode==='Need Repair'?C.REPAIR_DET
+                  : wCode==='NG+Repair'?C.NGREPAIR_DET : wCode==='Need Check'?C.CHECK_DET : C.FAIL_DET;
       const vals=[d.filename,d.program,d.comment,r.no,r.measurement,r.nominal,r.actual,r.deviation,r.tolMinus,r.tolPlus,r.pf,wCode];
       const HA=['left','left','left','center','left','center','center','center','center','center','center','center'];
       vals.forEach((v,ci)=>{
@@ -373,8 +397,10 @@ function buildSummary(ws, data) {
         if (col===11) {
           sc(cell,{val:v,bg:C.RED_BG,fg:C.RED_FG,bold:true,ha:'center',fmt});
         } else if (col===12) {
-          const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG : rowBg;
-          const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG : C.BLACK;
+          const wBg = wCode==='Waive'?C.ORANGE_BG : wCode==='Need Repair'?C.REPAIR_BG
+                    : wCode==='NG+Repair'?C.NGREPAIR_BG : wCode==='Need Check'?C.CHECK_BG : rowBg;
+          const wFg = wCode==='Waive'?C.ORANGE_FG : wCode==='Need Repair'?C.REPAIR_FG
+                    : wCode==='NG+Repair'?C.NGREPAIR_FG : wCode==='Need Check'?C.CHECK_FG : C.BLACK;
           sc(cell,{val:v,bg:wBg,fg:wFg,bold:!!wCode,ha:'center',fmt});
         } else {
           sc(cell,{val:v,bg:rowBg,ha:HA[ci],fmt});
@@ -424,14 +450,16 @@ async function processFiles() {
       const ws = wb.addWorksheet(sname);
       const {fails, total} = buildSheet(ws, hdr, rows);
 
-      const failRows  = rows.filter(r=>r.pf==='FAIL');
-      const waiveCnt  = failRows.filter(r=>getWaiveStatus(r)==='Waive').length;
-      const repairCnt = failRows.filter(r=>getWaiveStatus(r)==='Need Repair').length;
+      const failRows    = rows.filter(r=>r.pf==='FAIL');
+      const waiveCnt    = failRows.filter(r=>getWaiveStatus(r)==='Waive').length;
+      const repairCnt   = failRows.filter(r=>getWaiveStatus(r)==='Need Repair').length;
+      const ngrepairCnt = failRows.filter(r=>getWaiveStatus(r)==='NG+Repair').length;
+      const checkCnt    = failRows.filter(r=>getWaiveStatus(r)==='Need Check').length;
 
       summaryData.push({
         filename:name, program:hdr.program, date:hdr.date, comment:hdr.comment,
-        total, fail:fails, waive:waiveCnt, repair:repairCnt, pass:total-fails,
-        rate: total>0 ? (total-fails)/total*100 : 0,
+        total, fail:fails, waive:waiveCnt, repair:repairCnt, ngrepair:ngrepairCnt, check:checkCnt,
+        pass:total-fails, rate: total>0 ? (total-fails)/total*100 : 0,
         failRows
       });
     }
@@ -445,11 +473,13 @@ async function processFiles() {
     a.href=url; a.download='측정결과_정리.xlsx'; a.click();
     URL.revokeObjectURL(url);
 
-    const tFail   = summaryData.reduce((s,d)=>s+d.fail,0);
-    const tWaive  = summaryData.reduce((s,d)=>s+d.waive,0);
-    const tRepair = summaryData.reduce((s,d)=>s+d.repair,0);
+    const tFail    = summaryData.reduce((s,d)=>s+d.fail,0);
+    const tWaive   = summaryData.reduce((s,d)=>s+d.waive,0);
+    const tRepair  = summaryData.reduce((s,d)=>s+d.repair,0);
+    const tNgr     = summaryData.reduce((s,d)=>s+d.ngrepair,0);
+    const tChk     = summaryData.reduce((s,d)=>s+d.check,0);
     status.className='success';
-    status.innerHTML=`✅ 완료!&nbsp; ${summaryData.length}개 제품 &nbsp;·&nbsp; FAIL <strong>${tFail}건</strong> &nbsp;·&nbsp; Waive <strong>${tWaive}건</strong> &nbsp;·&nbsp; Need Repair <strong>${tRepair}건</strong> &nbsp;·&nbsp; Excel 다운로드 시작`;
+    status.innerHTML=`✅ 완료!&nbsp; ${summaryData.length}개 제품 &nbsp;·&nbsp; FAIL <strong>${tFail}건</strong> &nbsp;·&nbsp; Waive <strong>${tWaive}</strong> &nbsp;·&nbsp; Need Repair <strong>${tRepair}</strong> &nbsp;·&nbsp; NG+Repair <strong>${tNgr}</strong> &nbsp;·&nbsp; Need Check <strong>${tChk}</strong> &nbsp;·&nbsp; Excel 다운로드 시작`;
   } catch(e) {
     status.className='error';
     status.innerHTML=`❌ 오류: ${e.message}`;
