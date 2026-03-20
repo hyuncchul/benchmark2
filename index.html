@@ -405,11 +405,11 @@ function buildSummary(ws, data) {
     ws.getRow(sRow).height=14;
   });
 
-  // ══ ② 조치 필요 항목 섹션 (통계 바로 아래) ═══════════
+  // ══ ② Repair / 조치 필요 목록 (통계 바로 아래) ════════
   const repStart = sRow+2;
   ws.mergeCells(repStart,1,repStart,nd);
-  sc(ws.getCell(repStart,1),{val:'■  조치 필요 항목 (Need Repair / NG+Repair / Need Check)',
-    bg:'FF4A148C',fg:C.REPAIR_FG,bold:true,sz:12,ha:'left',border:false});
+  sc(ws.getCell(repStart,1),{val:'■  Repair / 조치 필요 목록 (Need Repair / NG+Repair / Need Check)',
+    bg:'FFBF360C',fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
   ws.getRow(repStart).height=22;
 
   D_HDRS.forEach((t,i)=>sc(ws.getCell(repStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
@@ -429,32 +429,8 @@ function buildSummary(ws, data) {
     ws.getRow(rCur).height=14; rCur++;
   }
 
-  // ══ ③ Repair 항목 목록 (Need Repair + NG+Repair만) ═══
-  const rpStart = rCur+2;
-  ws.mergeCells(rpStart,1,rpStart,nd);
-  sc(ws.getCell(rpStart,1),{val:'■  Repair 항목 목록 (Need Repair / NG+Repair)',
-    bg:'FFBF360C',fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
-  ws.getRow(rpStart).height=22;
-
-  D_HDRS.forEach((t,i)=>sc(ws.getCell(rpStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
-  ws.getRow(rpStart+1).height=16;
-
-  let rpCur=rpStart+2, rpPrevFile=null, hasRpRows=false;
-  data.forEach(d=>{
-    const rpRows = d.failRows.filter(r=>REPAIR_ONLY_CODES.has(getWaiveStatus(r)));
-    if (!rpRows.length) return;
-    hasRpRows=true;
-    if (rpPrevFile!==d.filename) { writeFileHdr(rpCur,d); rpCur++; rpPrevFile=d.filename; }
-    rpRows.forEach(r=>{ writeDetailRow(rpCur,d,r); rpCur++; });
-  });
-  if (!hasRpRows) {
-    ws.mergeCells(rpCur,1,rpCur,nd);
-    sc(ws.getCell(rpCur,1),{val:'  Repair 해당 항목 없음',fg:C.GRAY,sz:9,ha:'left',border:false});
-    ws.getRow(rpCur).height=14; rpCur++;
-  }
-
-  // ══ ④ FAIL 전체 상세 섹션 ══════════════════════════════
-  const detStart = rpCur+2;
+  // ══ ③ FAIL 전체 상세 섹션 ══════════════════════════════
+  const detStart = rCur+2;
   ws.mergeCells(detStart,1,detStart,nd);
   sc(ws.getCell(detStart,1),{val:'■  기준 초과(FAIL) 전체 상세 목록',bg:C.DARKRED_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
   ws.getRow(detStart).height=22;
