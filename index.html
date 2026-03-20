@@ -330,14 +330,15 @@ function buildSheet(ws, hdr, rows) {
 //  요약 시트
 // ══════════════════════════════════════════════════════════
 const S_HDRS  = ["파일명","제품(Program)","날짜/시간","Comment","총 측정수","FAIL 수","Waive 수","Need Repair 수","NG+Repair 수","Need Check 수","PASS 수","합격률(%)"];
-const S_WITHS = [32,30,28,18,12,10,10,14,12,13,10,12];
+const S_WITHS = [40,36,30,22,13,11,11,15,13,14,11,13];
 const D_HDRS  = ["파일명","제품(Program)","Comment","No.","측정항목","Nominal","Actual","Deviation","-Tol","+Tol","P/F","판정"];
-const D_WITHS = [32,30,18,6,22,10,10,10,8,8,7,12];
+const D_WITHS = [40,36,22,6,32,12,12,12,10,10,8,15];
 
 function buildSummary(ws, data) {
   const nd = D_HDRS.length;
   const NUMCOLS = [6,7,8,9,10];
-  const REPAIR_CODES = new Set(['Need Repair','NG+Repair','Need Check']);
+  const REPAIR_CODES      = new Set(['Need Repair','NG+Repair','Need Check']); // 조치 필요 전체
+  const REPAIR_ONLY_CODES = new Set(['Need Repair','NG+Repair']);               // Repair 목록 전용
 
   // ── 공통: 컬럼 너비 (D_WITHS 기준, S_HDRS가 더 넓으므로 max 적용) ──
   D_WITHS.forEach((w,i)=>ws.getColumn(i+1).width=w);
@@ -428,8 +429,32 @@ function buildSummary(ws, data) {
     ws.getRow(rCur).height=14; rCur++;
   }
 
-  // ══ ③ FAIL 전체 상세 섹션 ══════════════════════════════
-  const detStart = rCur+2;
+  // ══ ③ Repair 항목 목록 (Need Repair + NG+Repair만) ═══
+  const rpStart = rCur+2;
+  ws.mergeCells(rpStart,1,rpStart,nd);
+  sc(ws.getCell(rpStart,1),{val:'■  Repair 항목 목록 (Need Repair / NG+Repair)',
+    bg:'FFBF360C',fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
+  ws.getRow(rpStart).height=22;
+
+  D_HDRS.forEach((t,i)=>sc(ws.getCell(rpStart+1,i+1),{val:t,bg:C.HEADER_BG,fg:C.HEADER_FG,bold:true}));
+  ws.getRow(rpStart+1).height=16;
+
+  let rpCur=rpStart+2, rpPrevFile=null, hasRpRows=false;
+  data.forEach(d=>{
+    const rpRows = d.failRows.filter(r=>REPAIR_ONLY_CODES.has(getWaiveStatus(r)));
+    if (!rpRows.length) return;
+    hasRpRows=true;
+    if (rpPrevFile!==d.filename) { writeFileHdr(rpCur,d); rpCur++; rpPrevFile=d.filename; }
+    rpRows.forEach(r=>{ writeDetailRow(rpCur,d,r); rpCur++; });
+  });
+  if (!hasRpRows) {
+    ws.mergeCells(rpCur,1,rpCur,nd);
+    sc(ws.getCell(rpCur,1),{val:'  Repair 해당 항목 없음',fg:C.GRAY,sz:9,ha:'left',border:false});
+    ws.getRow(rpCur).height=14; rpCur++;
+  }
+
+  // ══ ④ FAIL 전체 상세 섹션 ══════════════════════════════
+  const detStart = rpCur+2;
   ws.mergeCells(detStart,1,detStart,nd);
   sc(ws.getCell(detStart,1),{val:'■  기준 초과(FAIL) 전체 상세 목록',bg:C.DARKRED_BG,fg:C.RED_FG,bold:true,sz:12,ha:'left',border:false});
   ws.getRow(detStart).height=22;
