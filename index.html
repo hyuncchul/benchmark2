@@ -481,7 +481,10 @@ async function processFiles() {
     for (const {name, hdr, rows} of fileList) {
       if (!rows.length) continue;
 
-      const sname = safeSheet(name.replace(/\.(txt|xlsx)$/i,''), used);
+      const baseName = name.replace(/\.(txt|xlsx)$/i,'');
+      const fIdx = baseName.indexOf('F');
+      const sheetLabel = fIdx > 0 ? baseName.slice(0, fIdx) : baseName;
+      const sname = safeSheet(sheetLabel.trim(), used);
       const ws = wb.addWorksheet(sname);
       const {fails, total} = buildSheet(ws, hdr, rows);
 
